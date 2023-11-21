@@ -15,6 +15,10 @@ export async function proxy(req: Request) {
             return postQuery(url, data)
         } else if (postType === 'form') {
             return postForm(url, data)
+        } else {
+            throw new Error(`postType: ${postType} 不支持`)
         }
+    } else {
+        throw new Error(`method: ${_method} 不支持`)
     }
 }

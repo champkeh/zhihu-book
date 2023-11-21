@@ -1,29 +1,38 @@
-import buffer from 'https://cdn.jsdelivr.net/npm/buffer@6.0.3/+esm'
 import CryptoJS from 'https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/+esm'
 import crypto from 'https://cdn.jsdelivr.net/npm/crypto-browserify@3.12.0/+esm'
-import {request} from './utils.js'
+import {request, sleep} from './utils.js'
 
-// console.log(crypto)
+const {Buffer} = window.browserCrypto
 
+const API_BASE = 'https://www.zhihu.com/api/'
 const clientId = '5774b305d2ae4469a2c9258956ea48'
+
 const bookId = '119577471'
 const chapterUid = '1054090328193302528'
-const ApiBase = 'https://www.zhihu.com/api/'
 
 
+// 获取章节目录
+async function getChapters(bookId) {
+    const payload = {
+        method: 'get',
+        url: `${API_BASE}v3/books/${bookId}/chapters`
+    }
+    const resp = await request(payload)
+    return resp.updated
+}
 
 // 获取密钥
 async function download_info(bookId, chapterUid) {
     const payload = {
         method: 'get',
-        url: `${ApiBase}v3/books/${bookId}/chapters/${chapterUid}/download_info`
+        url: `${API_BASE}v3/books/${bookId}/chapters/${chapterUid}/download_info`
     }
     return await request(payload)
 }
 
-async function download(bookId, chapterUid, key, keyHash) {
+// 获取文件路径
+async function download(bookId, chapterUid, transKey, keyHash) {
     const timestamp = Number(new Date)
-    const transKey = getTransKey(key)
     const sign = signPayload([chapterUid, transKey, clientId, timestamp.toString(), keyHash])
     const payload = {
         client_id: clientId,
@@ -34,29 +43,26 @@ async function download(bookId, chapterUid, key, keyHash) {
     }
     return request({
         method: 'post',
-        url: `${ApiBase}v3/books/${bookId}/chapters/${chapterUid}/download`,
+        url: `${API_BASE}v3/books/${bookId}/chapters/${chapterUid}/download`,
         data: payload,
         postType: 'form',
     })
 }
 
+// 获取本地key
 function getTransKey(key) {
     const _transKey = Array.from({length: 16}).map(() => Math.floor(16 * Math.random()).toString(16).toUpperCase()).join("")
-    const body = buffer.Buffer.alloc(128 - _transKey.length)
-    const buf = buffer.Buffer.concat([body, buffer.Buffer.from(_transKey)])
-    return crypto.publicEncrypt({
+    const body = Buffer.alloc(128 - _transKey.length)
+    const buf = Buffer.concat([body, Buffer.from(_transKey)])
+    const transKey = crypto.publicEncrypt({
         key: key,
         padding: crypto.constants.RSA_NO_PADDING || 3,
     }, buf).toString('base64')
+    return [transKey, _transKey]
 }
 
+// 计算签名
 function signPayload(payload) {
-    // const e = crypto.createHmac("sha1", "key")
-    // for (const value of payload) {
-    //     e.update(value)
-    // }
-    // return e.digest("hex")
-
     const hmac = CryptoJS.algo.HMAC.create(CryptoJS.algo.SHA1, "key");
     for (const value of payload) {
         hmac.update(value);
@@ -65,17 +71,67 @@ function signPayload(payload) {
     return CryptoJS.enc.Hex.stringify(hash)
 }
 
-
-async function run(bookId, chapterUid) {
-    const {key, key_hash} = await download_info(bookId, chapterUid)
-    const resp = await download(bookId, chapterUid, key, key_hash)
-    console.log(resp)
+// 解密
+function l(key, buffer, encoding) {
+    let iv, data;
+    if (typeof buffer === 'string') {
+        let s = Buffer.from(buffer, "base64");
+        iv = Buffer.alloc(16)
+        data = Buffer.alloc(s.length - 16)
+        s.copy(iv, 0, 0, 16)
+        s.copy(data, 0, 16)
+    } else {
+        if (!(buffer instanceof Buffer)) {
+            return ""
+        }
+        iv = buffer.slice(0, 16)
+        data = buffer.slice(16)
+    }
+    return window.browserCrypto.createDecipheriv("aes-128-cfb8", key, iv).update(data, null, encoding)
 }
 
-// run(bookId, chapterUid)
+// 下载 html 内容
+function p(bookId, chapterUid, htmlPath, key) {
+    const payload = {
+        method: 'get',
+        url: htmlPath,
+    }
+    return request(payload, false).then(resp => {
+        return key ? resp.blob() : resp.text()
+    }).then(content => {
+        return key
+            ? new Promise(resolve => {
+                const reader = new window.FileReader()
+                reader.readAsArrayBuffer(content)
+                reader.onload = () => {
+                    const buffer = Buffer.from(reader.result)
+                    const text = l(key, buffer, 'utf8')
+                    resolve(text)
+                }
+            })
+            : content
+    })
+}
 
-const transKey = 'etIa8FDeLOKKw0q91Ahtr8+Nn0gsR8NZ1kWE0T3KnrUjNhoUgBR7AuVtbq+tkXyXD4MtKYjVAmLmsU9xUnWdcyqRD8D3iO7RS+FygXl/pQ5bKFOtyL1owb6ZhfQAkLRUJ/O65syW5/9kULcDGS363PUSdOpgHI/MaUkJyJquCOI='
-const sign = signPayload([chapterUid, transKey, '1700530954464', clientId, 'E48FBEA6AACC8177E10AF1190421E92B'])
-console.log(sign)
-// 1001cc21f1525ebae6ab379d660dbfcf77725a9c
-// c3c715e6c601edd687f23139881b802f3e1e4f5e
+async function downloadChapter(bookId, chapterUid) {
+    const {key, key_hash} = await download_info(bookId, chapterUid)
+    const [transKey, _transKey] = getTransKey(key)
+    const resp = await download(bookId, chapterUid, transKey, key_hash)
+    const k = l(_transKey, resp.key, "utf8")
+    return await p(bookId, chapterUid, resp.html_path, k)
+}
+
+async function downloadBook(bookId) {
+    const results = []
+    const chapters = await getChapters(bookId)
+    for (const chapter of chapters) {
+        const text = await downloadChapter(bookId, chapter.chapter_uid)
+        results.push(text)
+        await sleep(1000)
+    }
+    return results
+}
+
+downloadBook(bookId).then(resp => {
+    console.log(resp)
+})
