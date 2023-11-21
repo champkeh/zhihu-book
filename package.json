@@ -1,0 +1,12 @@
+{
+  "name": "zhihu-book",
+  "version": "1.0.0",
+  "main": "index.js",
+  "repository": "git@github.com:champkeh/zhihu-book.git",
+  "author": "champkeh <champion.ge@gmail.com>",
+  "license": "MIT",
+  "scripts": {
+    "dev": "deno run -A --unstable src/server.ts",
+    "test": "node test/node.js"
+  }
+}
