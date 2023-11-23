@@ -157,7 +157,7 @@ document.querySelector('form').addEventListener('submit', async (evt) => {
 
     const formData = new FormData(evt.target)
     const bookId = formData.get('bookId').trim()
-    const cookie = formData.get('cookie').trim()
+    const cookie = (formData.get('cookie') || '').trim()
 
     if (bookId) {
         const resp = await downloadBook(bookId, cookie)
