@@ -25,6 +25,7 @@ export function get(
     "User-Agent": UserAgentForWeb,
     "Referer": Referer,
     "Origin": Origin,
+    "X-Requested-With": "Fetch",
     ...header,
   };
   return fetch(url, {
@@ -45,6 +46,7 @@ function post(
     "User-Agent": UserAgentForWeb,
     "Referer": Referer,
     "Origin": Origin,
+    "X-Requested-With": "Fetch",
     ...header,
   };
 
